@@ -10,6 +10,7 @@
 package org.truffleruby.language.methods;
 
 import com.oracle.truffle.api.CallTarget;
+import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.object.DynamicObject;
 import org.truffleruby.Layouts;
@@ -42,7 +43,7 @@ public class InternalMethod implements ObjectGraphNode {
     private final boolean builtIn;
     /** A flag to tell whether there exist refinements of this method */
     private final boolean refined;
-    private final DynamicObject proc; // only if method is created from a Proc
+    @CompilationFinal private DynamicObject proc; // only if method is created from a Proc
 
     private final CallTarget callTarget;
     private final DynamicObject capturedBlock;
@@ -401,8 +402,13 @@ public class InternalMethod implements ObjectGraphNode {
         return lexicalScope;
     }
 
+
     public DeclarationContext getDeclarationContext() {
         return declarationContext;
+    }
+
+    public void setMethodProc(DynamicObject proc) {
+        this.proc = proc;
     }
 
 }
