@@ -12,6 +12,8 @@ package org.truffleruby.core.fiber;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
+import java.util.WeakHashMap;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -63,7 +65,13 @@ public class FiberManager {
 
     @TruffleBoundary
     private static Set<DynamicObject> newFiberSet() {
-        return Collections.newSetFromMap(new ConcurrentHashMap<DynamicObject, Boolean>());
+        return Collections.synchronizedSet(Collections.newSetFromMap(new WeakHashMap<DynamicObject, Boolean>()));
+    }
+
+    private DynamicObject[] iterateRunningFibers() {
+        // We need to make a copy while holding the lock
+        // Collections.synchronizedSet() does not synchronize iterator()
+        return runningFibers.toArray(new DynamicObject[0]);
     }
 
     public DynamicObject getRootFiber() {
@@ -94,16 +102,16 @@ public class FiberManager {
     }
 
     private DynamicObject createRootFiber(RubyContext context, DynamicObject thread) {
-        return createFiber(context, thread, context.getCoreLibrary().getFiberFactory(), "root Fiber for Thread");
+        return createFiber(context, thread, context.getCoreLibrary().getFiberFactory(), "root Fiber for Thread", true);
     }
 
-    public DynamicObject createFiber(RubyContext context, DynamicObject thread, DynamicObjectFactory factory, String name) {
+    public DynamicObject createFiber(RubyContext context, DynamicObject thread, DynamicObjectFactory factory, String name, boolean rootFiber) {
         assert RubyGuards.isRubyThread(thread);
         CompilerAsserts.partialEvaluationConstant(context);
         final DynamicObject fiberLocals = Layouts.BASIC_OBJECT.createBasicObject(context.getCoreLibrary().getObjectFactory());
         final DynamicObject catchTags = ArrayHelpers.createArray(context, null, 0);
 
-        return Layouts.FIBER.createFiber(
+        final DynamicObject fiber = Layouts.FIBER.createFiber(
                 factory,
                 fiberLocals,
                 catchTags,
@@ -115,6 +123,18 @@ public class FiberManager {
                 true,
                 null,
                 false);
+
+        if (!rootFiber) {
+            final BlockingQueue<FiberMessage> queue = Layouts.FIBER.getMessageQueue(fiber);
+            context.getFinalizationService().addFinalizer(fiber, FiberManager.class, () -> shutdownFiberWhenUnreachable(queue));
+        }
+
+        return fiber;
+    }
+
+    public static void shutdownFiberWhenUnreachable(BlockingQueue<FiberMessage> queue) {
+        System.err.println("Killing fiber " + queue.hashCode());
+        queue.add(new FiberShutdownMessage());
     }
 
     @TruffleBoundary
@@ -297,7 +317,7 @@ public class FiberManager {
         // All Fibers except the current one are in waitForResume(),
         // so sending a FiberShutdownMessage is enough to finish them.
         // This also avoids the performance cost of a safepoint.
-        for (DynamicObject fiber : runningFibers) {
+        for (DynamicObject fiber : iterateRunningFibers()) {
             if (fiber != rootFiber) {
                 addToMessageQueue(fiber, new FiberShutdownMessage());
 
@@ -316,7 +336,7 @@ public class FiberManager {
     public String getFiberDebugInfo() {
         final StringBuilder builder = new StringBuilder();
 
-        for (DynamicObject fiber : runningFibers) {
+        for (DynamicObject fiber : iterateRunningFibers()) {
             builder.append("  fiber @");
             builder.append(ObjectIDOperations.verySlowGetObjectID(context, fiber));
             builder.append(" #");
