@@ -60,7 +60,7 @@ public abstract class FiberNodes {
                 FiberOperation operation, Object[] args,
                 @Cached("create()") BranchProfile errorProfile) {
 
-            if (!Layouts.FIBER.getAlive(fiber)) {
+            if (!Layouts.FIBER.getFiberData(fiber).isAlive()) {
                 errorProfile.enter();
                 throw new RaiseException(coreExceptions().deadFiberCalledError(this));
             }
@@ -139,7 +139,7 @@ public abstract class FiberNodes {
                 @Cached("createBinaryProfile()") ConditionProfile doubleResumeProfile,
                 @Cached("createBinaryProfile()") ConditionProfile transferredProfile) {
 
-            final DynamicObject parentFiber = Layouts.FIBER.getLastResumedByFiber(fiber);
+            final DynamicObject parentFiber = Layouts.FIBER.getFiberData(fiber).getLastResumedByFiber();
             final FiberManager fiberToResumeManager = Layouts.THREAD.getFiberManager(Layouts.FIBER.getRubyThread(fiber));
 
             if (doubleResumeProfile.profile(parentFiber != null || fiber == fiberToResumeManager.getRootFiber())) {
@@ -173,7 +173,7 @@ public abstract class FiberNodes {
             final FiberManager fiberManager = Layouts.THREAD.getFiberManager(currentThread);
             final DynamicObject currentFiber = fiberManager.getCurrentFiber();
 
-            final DynamicObject fiberYieldedTo = fiberManager.getReturnFiber(currentFiber, this, errorProfile);
+            final DynamicObject fiberYieldedTo = fiberManager.getReturnFiber(Layouts.FIBER.getFiberData(currentFiber), this, errorProfile);
 
             return fiberTransferNode.executeTransferControlTo(frame, currentThread, currentFiber, fiberYieldedTo, FiberOperation.YIELD, args);
         }
@@ -185,7 +185,7 @@ public abstract class FiberNodes {
 
         @Specialization
         public boolean alive(DynamicObject fiber) {
-            return Layouts.FIBER.getAlive(fiber);
+            return Layouts.FIBER.getFiberData(fiber).isAlive();
         }
 
     }
@@ -210,7 +210,7 @@ public abstract class FiberNodes {
                 @Cached("create()") GetCurrentRubyThreadNode getCurrentRubyThreadNode) {
             final DynamicObject currentThread = getCurrentRubyThreadNode.executeGetRubyThread(frame);
             final DynamicObject currentFiber = Layouts.THREAD.getFiberManager(currentThread).getCurrentFiber();
-            return Layouts.FIBER.getCatchTags(currentFiber);
+            return Layouts.FIBER.getFiberData(currentFiber).getCatchTags();
         }
     }
 

@@ -63,7 +63,7 @@ public abstract class GetCurrentRubyThreadNode extends RubyNode {
     }
 
     protected boolean hasThread(VirtualFrame frame, DynamicObject fiber) {
-        return Layouts.FIBER.getThread(fiber) != null;
+        return Layouts.FIBER.getFiberData(fiber).getThread() != null;
     }
 
     protected int getCacheLimit() {

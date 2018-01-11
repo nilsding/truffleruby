@@ -12,12 +12,10 @@ package org.truffleruby.core.fiber;
 import com.oracle.truffle.api.object.DynamicObject;
 import com.oracle.truffle.api.object.DynamicObjectFactory;
 import com.oracle.truffle.api.object.dsl.Layout;
-import com.oracle.truffle.api.object.dsl.Nullable;
 import com.oracle.truffle.api.object.dsl.Volatile;
 import org.truffleruby.core.basicobject.BasicObjectLayout;
 
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.CountDownLatch;
 
 @Layout
 public interface FiberLayout extends BasicObjectLayout {
@@ -26,39 +24,18 @@ public interface FiberLayout extends BasicObjectLayout {
                                           DynamicObject metaClass);
 
     DynamicObject createFiber(DynamicObjectFactory factory,
-                              DynamicObject fiberLocals,
-                              DynamicObject catchTags,
-                              CountDownLatch initializedLatch,
-                              CountDownLatch finishedLatch,
+                              FiberData fiberData,
                               BlockingQueue<FiberManager.FiberMessage> messageQueue,
                               DynamicObject rubyThread,
-                              @Volatile @Nullable DynamicObject lastResumedByFiber,
-                              @Volatile boolean alive,
-                              @Volatile @Nullable Thread thread,
                               @Volatile boolean transferred);
 
     boolean isFiber(DynamicObject object);
 
-    DynamicObject getFiberLocals(DynamicObject object);
-
-    DynamicObject getCatchTags(DynamicObject object);
-
-    CountDownLatch getInitializedLatch(DynamicObject object);
-
-    CountDownLatch getFinishedLatch(DynamicObject object);
+    FiberData getFiberData(DynamicObject object);
 
     BlockingQueue<FiberManager.FiberMessage> getMessageQueue(DynamicObject object);
 
     DynamicObject getRubyThread(DynamicObject object);
-
-    DynamicObject getLastResumedByFiber(DynamicObject object);
-    void setLastResumedByFiber(DynamicObject object, DynamicObject value);
-
-    boolean getAlive(DynamicObject object);
-    void setAlive(DynamicObject object, boolean value);
-
-    Thread getThread(DynamicObject object);
-    void setThread(DynamicObject object, Thread value);
 
     boolean getTransferred(DynamicObject object);
     void setTransferred(DynamicObject object, boolean value);

@@ -21,7 +21,6 @@ import java.util.concurrent.LinkedBlockingQueue;
 import org.truffleruby.Layouts;
 import org.truffleruby.RubyContext;
 import org.truffleruby.RubyLanguage;
-import org.truffleruby.core.array.ArrayHelpers;
 import org.truffleruby.core.proc.ProcOperations;
 import org.truffleruby.core.thread.ThreadManager;
 import org.truffleruby.core.thread.ThreadManager.BlockingAction;
@@ -34,7 +33,6 @@ import org.truffleruby.language.control.ReturnException;
 import org.truffleruby.language.control.TerminationException;
 import org.truffleruby.language.objects.ObjectIDOperations;
 
-import com.oracle.truffle.api.CompilerAsserts;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.object.DynamicObject;
@@ -107,21 +105,12 @@ public class FiberManager {
 
     public DynamicObject createFiber(RubyContext context, DynamicObject thread, DynamicObjectFactory factory, String name, boolean rootFiber) {
         assert RubyGuards.isRubyThread(thread);
-        CompilerAsserts.partialEvaluationConstant(context);
-        final DynamicObject fiberLocals = Layouts.BASIC_OBJECT.createBasicObject(context.getCoreLibrary().getObjectFactory());
-        final DynamicObject catchTags = ArrayHelpers.createArray(context, null, 0);
 
         final DynamicObject fiber = Layouts.FIBER.createFiber(
                 factory,
-                fiberLocals,
-                catchTags,
-                new CountDownLatch(1),
-                new CountDownLatch(1),
+                new FiberData(context),
                 newMessageQueue(),
                 thread,
-                null,
-                true,
-                null,
                 false);
 
         if (!rootFiber) {
@@ -150,7 +139,7 @@ public class FiberManager {
 
     /** Wait for full initialization of the new fiber */
     public static void waitForInitialization(RubyContext context, DynamicObject fiber, Node currentNode) {
-        final CountDownLatch initializedLatch = Layouts.FIBER.getInitializedLatch(fiber);
+        final CountDownLatch initializedLatch = Layouts.FIBER.getFiberData(fiber).getInitializedLatch();
 
         context.getThreadManager().runUntilResultKeepStatus(currentNode, () -> {
             initializedLatch.await();
@@ -163,6 +152,9 @@ public class FiberManager {
     private void fiberMain(RubyContext context, DynamicObject fiber, DynamicObject block, Node currentNode) {
         assert fiber != rootFiber : "Root Fibers execute threadMain() and not fiberMain()";
 
+        final FiberData fiberData = Layouts.FIBER.getFiberData(fiber);
+        final BlockingQueue<FiberMessage> messageQueue = Layouts.FIBER.getMessageQueue(fiber);
+
         final Thread thread = Thread.currentThread();
         final SourceSection sourceSection = Layouts.PROC.getSharedMethodInfo(block).getSourceSection();
         final String oldName = thread.getName();
@@ -171,47 +163,47 @@ public class FiberManager {
         start(fiber, thread);
         try {
 
-            final Object[] args = waitForResume(fiber);
+            final Object[] args = waitForResume(fiber, messageQueue);
             final Object result;
             try {
                 result = ProcOperations.rootCall(block, args);
             } finally {
                 // Make sure that other fibers notice we are dead before they gain control back
-                Layouts.FIBER.setAlive(fiber, false);
+                fiberData.setAlive(false);
             }
-            resume(fiber, getReturnFiber(fiber, currentNode, UNPROFILED), FiberOperation.YIELD, result);
+            resume(fiber, getReturnFiber(fiberData, currentNode, UNPROFILED), FiberOperation.YIELD, result);
 
         // Handlers in the same order as in ThreadManager
         } catch (KillException | ExitException | RaiseException e) {
             // Propagate the exception until it reaches the root Fiber
-            sendExceptionToParentFiber(fiber, e, currentNode);
+            sendExceptionToParentFiber(fiberData, e, currentNode);
         } catch (FiberShutdownException e) {
             // Ends execution of the Fiber
         } catch (BreakException e) {
-            sendExceptionToParentFiber(fiber, new RaiseException(context.getCoreExceptions().breakFromProcClosure(currentNode)), currentNode);
+            sendExceptionToParentFiber(fiberData, new RaiseException(context.getCoreExceptions().breakFromProcClosure(currentNode)), currentNode);
         } catch (ReturnException e) {
-            sendExceptionToParentFiber(fiber, new RaiseException(context.getCoreExceptions().unexpectedReturn(currentNode)), currentNode);
+            sendExceptionToParentFiber(fiberData, new RaiseException(context.getCoreExceptions().unexpectedReturn(currentNode)), currentNode);
         } finally {
-            cleanup(fiber, thread);
+            cleanup(fiberData, thread);
             thread.setName(oldName);
         }
     }
 
-    private void sendExceptionToParentFiber(DynamicObject fiber, RuntimeException exception, Node currentNode) {
-        addToMessageQueue(getReturnFiber(fiber, currentNode, UNPROFILED), new FiberExceptionMessage(exception));
+    private void sendExceptionToParentFiber(FiberData fiberData, RuntimeException exception, Node currentNode) {
+        addToMessageQueue(getReturnFiber(fiberData, currentNode, UNPROFILED), new FiberExceptionMessage(exception));
     }
 
-    public DynamicObject getReturnFiber(DynamicObject currentFiber, Node currentNode, BranchProfile errorProfile) {
-        assert currentFiber == this.currentFiber;
+    public DynamicObject getReturnFiber(FiberData currentFiber, Node currentNode, BranchProfile errorProfile) {
+        assert currentFiber == Layouts.FIBER.getFiberData(this.currentFiber);
 
-        if (currentFiber == rootFiber) {
+        if (currentFiber == Layouts.FIBER.getFiberData(rootFiber)) {
             errorProfile.enter();
             throw new RaiseException(context.getCoreExceptions().yieldFromRootFiberError(currentNode));
         }
 
-        final DynamicObject parentFiber = Layouts.FIBER.getLastResumedByFiber(currentFiber);
+        final DynamicObject parentFiber = currentFiber.getLastResumedByFiber();
         if (parentFiber != null) {
-            Layouts.FIBER.setLastResumedByFiber(currentFiber, null);
+            currentFiber.setLastResumedByFiber(null);
             return parentFiber;
         } else {
             return rootFiber;
@@ -228,11 +220,9 @@ public class FiberManager {
      * message.
      */
     @TruffleBoundary
-    private Object[] waitForResume(DynamicObject fiber) {
-        assert RubyGuards.isRubyFiber(fiber);
-
+    private Object[] waitForResume(DynamicObject fiber, BlockingQueue<FiberMessage> messageQueue) {
         final FiberMessage message = context.getThreadManager().runUntilResultKeepStatus(null,
-                () -> Layouts.FIBER.getMessageQueue(fiber).take());
+                () -> messageQueue.take());
 
         setCurrentFiber(fiber);
 
@@ -244,7 +234,7 @@ public class FiberManager {
             final FiberResumeMessage resumeMessage = (FiberResumeMessage) message;
             assert context.getThreadManager().getCurrentThread() == Layouts.FIBER.getRubyThread(resumeMessage.getSendingFiber());
             if (resumeMessage.getOperation() == FiberOperation.RESUME) {
-                Layouts.FIBER.setLastResumedByFiber(fiber, resumeMessage.getSendingFiber());
+                Layouts.FIBER.getFiberData(fiber).setLastResumedByFiber(resumeMessage.getSendingFiber());
             }
             return resumeMessage.getArgs();
         } else {
@@ -263,7 +253,8 @@ public class FiberManager {
 
     public Object[] transferControlTo(DynamicObject fromFiber, DynamicObject fiber, FiberOperation operation, Object[] args) {
         resume(fromFiber, fiber, operation, args);
-        return waitForResume(fromFiber);
+        final BlockingQueue<FiberMessage> fromQueue = Layouts.FIBER.getMessageQueue(fromFiber);
+        return waitForResume(fromFiber, fromQueue);
     }
 
     public void start(DynamicObject fiber, Thread javaThread) {
@@ -276,7 +267,8 @@ public class FiberManager {
             rubyFiberForeignMap.put(javaThread, fiber);
         }
 
-        Layouts.FIBER.setThread(fiber, javaThread);
+        final FiberData fiberData = Layouts.FIBER.getFiberData(fiber);
+        fiberData.setThread(javaThread);
 
         final DynamicObject rubyThread = Layouts.FIBER.getRubyThread(fiber);
         threadManager.initializeValuesForJavaThread(rubyThread, javaThread);
@@ -288,11 +280,11 @@ public class FiberManager {
         }
 
         // fully initialized
-        Layouts.FIBER.getInitializedLatch(fiber).countDown();
+        fiberData.getInitializedLatch().countDown();
     }
 
-    public void cleanup(DynamicObject fiber, Thread javaThread) {
-        Layouts.FIBER.setAlive(fiber, false);
+    public void cleanup(FiberData fiberData, Thread javaThread) {
+        fiberData.setAlive(false);
 
         if (context.getThreadManager().isRubyManagedThread(javaThread)) {
             context.getSafepointManager().leaveThread();
@@ -300,16 +292,17 @@ public class FiberManager {
 
         context.getThreadManager().cleanupValuesForJavaThread(javaThread);
 
-        runningFibers.remove(fiber);
+        // TODO: should actively remove it or check alive instead?
+        // runningFibers.remove(fiber);
 
-        Layouts.FIBER.setThread(fiber, null);
+        fiberData.setThread(null);
 
         if (Thread.currentThread() == javaThread) {
             rubyFiber.remove();
         }
         rubyFiberForeignMap.remove(javaThread);
 
-        Layouts.FIBER.getFinishedLatch(fiber).countDown();
+        fiberData.getFinishedLatch().countDown();
     }
 
     @TruffleBoundary
@@ -322,7 +315,7 @@ public class FiberManager {
                 addToMessageQueue(fiber, new FiberShutdownMessage());
 
                 // Wait for the Fiber to finish so we only run one Fiber at a time
-                final CountDownLatch finishedLatch = Layouts.FIBER.getFinishedLatch(fiber);
+                final CountDownLatch finishedLatch = Layouts.FIBER.getFiberData(fiber).getFinishedLatch();
                 context.getThreadManager().runUntilResultKeepStatus(null, () -> {
                     finishedLatch.await();
                     return BlockingAction.SUCCESS;
@@ -330,7 +323,7 @@ public class FiberManager {
             }
         }
 
-        cleanup(rootFiber, javaThread);
+        cleanup(Layouts.FIBER.getFiberData(rootFiber), javaThread);
     }
 
     public String getFiberDebugInfo() {
@@ -341,7 +334,7 @@ public class FiberManager {
             builder.append(ObjectIDOperations.verySlowGetObjectID(context, fiber));
             builder.append(" #");
 
-            final Thread thread = Layouts.FIBER.getThread(fiber);
+            final Thread thread = Layouts.FIBER.getFiberData(fiber).getThread();
 
             if (thread == null) {
                 builder.append("(no Java thread)");

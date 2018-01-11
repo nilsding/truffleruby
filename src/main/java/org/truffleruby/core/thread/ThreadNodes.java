@@ -249,7 +249,7 @@ public abstract class ThreadNodes {
         @Specialization
         public boolean isInitialized(DynamicObject thread) {
             final DynamicObject rootFiber = Layouts.THREAD.getFiberManager(thread).getRootFiber();
-            final CountDownLatch initializedLatch = Layouts.FIBER.getInitializedLatch(rootFiber);
+            final CountDownLatch initializedLatch = Layouts.FIBER.getFiberData(rootFiber).getInitializedLatch();
             return initializedLatch.getCount() == 0;
         }
 
@@ -423,7 +423,7 @@ public abstract class ThreadNodes {
         public DynamicObject wakeup(DynamicObject rubyThread,
                                     @Cached("new()") YieldNode yieldNode) {
             final DynamicObject currentFiber = Layouts.THREAD.getFiberManager(rubyThread).getCurrentFiberRacy();
-            final Thread thread = Layouts.FIBER.getThread(currentFiber);
+            final Thread thread = Layouts.FIBER.getFiberData(currentFiber).getThread();
             if (thread == null) {
                 throw new RaiseException(coreExceptions().threadErrorKilledThread(this));
             }
@@ -607,7 +607,7 @@ public abstract class ThreadNodes {
         @Specialization(guards = "isRubyThread(thread)")
         public DynamicObject getFiberLocals(DynamicObject thread) {
             final DynamicObject fiber = Layouts.THREAD.getFiberManager(thread).getCurrentFiberRacy();
-            return Layouts.FIBER.getFiberLocals(fiber);
+            return Layouts.FIBER.getFiberData(fiber).getFiberLocals();
         }
     }
 
