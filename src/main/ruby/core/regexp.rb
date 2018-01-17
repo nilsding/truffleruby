@@ -93,9 +93,31 @@ class Regexp
   private :compile
 
   def search_region(str, start, finish, forward) # equiv to MRI's re_search
-    Truffle.primitive :regexp_search_region
-    raise PrimitiveFailure, 'Regexp#search_region primitive failed'
+    # Truffle.primitive :regexp_search_region
+    # raise PrimitiveFailure, 'Regexp#search_region primitive failed'
+
+    @matcher ||= begin
+      # Truffle::Ropes.debug_print "compiling #{source}"
+      regexp_source = "/#{source}/#{option_to_string(options)}"
+      Truffle::Interop.eval('application/js-regex', regexp_source)
+    end
+
+    # TODO: pass the finish argument
+    # result = @matcher.exec(str.byteslice(0, finish), start)
+    # result = @matcher.exec(str, start)
+    exec = @matcher[:exec]
+    result = Truffle::Interop.execute_without_conversion(exec, str, start)
+
+    if result[:isMatch]
+      n = result[:groupCount]
+      starts = n.times.map { |i| result[:start][i] }
+      ends = n.times.map { |i| result[:end][i] }
+      Truffle.invoke_primitive :matchdata_create, self, str.dup, starts, ends
+    else
+      nil
+    end
   end
+  Truffle::Graal.always_split instance_method(:search_region)
 
   def options
     Truffle.primitive :regexp_options

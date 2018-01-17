@@ -41,6 +41,7 @@ import org.truffleruby.builtins.CoreMethodArrayArgumentsNode;
 import org.truffleruby.builtins.NonStandard;
 import org.truffleruby.builtins.Primitive;
 import org.truffleruby.builtins.PrimitiveArrayArgumentsNode;
+import org.truffleruby.core.array.ArrayHelpers;
 import org.truffleruby.core.cast.TaintResultNode;
 import org.truffleruby.core.cast.ToStrNode;
 import org.truffleruby.core.cast.ToStrNodeGen;
@@ -207,6 +208,24 @@ public abstract class RegexpNodes {
         }
 
         return bytes;
+    }
+
+    @Primitive(name = "matchdata_create")
+    public abstract static class MatchDataCreateNode extends CoreMethodArrayArgumentsNode {
+
+        @Child private AllocateObjectNode allocateNode = AllocateObjectNode.create();
+
+        @Specialization
+        public Object create(DynamicObject regexp, DynamicObject string, DynamicObject starts, DynamicObject ends) {
+            final Region region = new Region(ArrayHelpers.getSize(starts));
+            int[] startsInt = (int[]) ArrayHelpers.getStore(starts);
+            int[] endsInt = (int[]) ArrayHelpers.getStore(ends);
+            for (int i = 0; i < region.numRegs; i++) {
+                region.beg[i] = startsInt[i];
+                region.end[i] = endsInt[i];
+            }
+            return allocateNode.allocate(coreLibrary().getMatchDataClass(), Layouts.MATCH_DATA.build(string, regexp, region, null));
+        }
     }
 
     @TruffleBoundary
