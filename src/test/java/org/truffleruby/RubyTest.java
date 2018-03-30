@@ -13,9 +13,9 @@ import com.oracle.truffle.api.interop.TruffleObject;
 import com.oracle.truffle.api.interop.java.JavaInterop;
 import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.nodes.NodeUtil;
-import com.oracle.truffle.api.source.Source;
 
 import org.graalvm.polyglot.Context;
+import org.graalvm.polyglot.Source;
 import org.jcodings.specific.UTF8Encoding;
 import org.truffleruby.language.RubyRootNode;
 import org.truffleruby.launcher.RubyLauncher;
@@ -23,12 +23,28 @@ import org.truffleruby.launcher.options.OptionsCatalog;
 import org.truffleruby.parser.ParserContext;
 import org.truffleruby.parser.TranslatorDriver;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.Reader;
 import java.util.List;
 import java.util.function.Consumer;
 
 import static org.junit.Assert.assertEquals;
 
 public abstract class RubyTest {
+
+    /** Load a resource as a Source of the new Context API. */
+    public static Source getSource(String path) {
+        final InputStream stream = ClassLoader.getSystemResourceAsStream(path);
+        final Reader reader = new InputStreamReader(stream);
+        try {
+            return Source.newBuilder(RubyLauncher.LANGUAGE_ID, reader, new File(path).getName()).build();
+        } catch (IOException e) {
+            throw new Error(e);
+        }
+    }
 
     protected <T extends Node> void testWithNode(String text, Class<T> nodeClass, Consumer<T> test) {
         testWithAST(text, (root) -> {
@@ -40,7 +56,8 @@ public abstract class RubyTest {
     }
 
     protected void testWithAST(String text, Consumer<RubyRootNode> test) {
-        final Source source = Source.newBuilder(text).name("test.rb").mimeType(RubyLanguage.MIME_TYPE).build();
+        final com.oracle.truffle.api.source.Source source =
+                com.oracle.truffle.api.source.Source.newBuilder(text).name("test.rb").mimeType(RubyLanguage.MIME_TYPE).build();
 
         testInContext(() -> {
             final TranslatorDriver translator = new TranslatorDriver(RubyLanguage.getCurrentContext());
@@ -54,7 +71,7 @@ public abstract class RubyTest {
         final TruffleObject testTruffleObject = JavaInterop.asTruffleFunction(Runnable.class, test);
 
         try (Context context = setupContext(Context.newBuilder()).build()) {
-            context.eval(org.graalvm.polyglot.Source.create(RubyLauncher.LANGUAGE_ID, "-> test { test.call }"))
+            context.eval(Source.create(RubyLauncher.LANGUAGE_ID, "-> test { test.call }"))
                     .execute(testTruffleObject);
         }
     }

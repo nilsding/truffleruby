@@ -22,7 +22,6 @@ import org.graalvm.polyglot.Source;
 import org.graalvm.polyglot.Value;
 import org.junit.Ignore;
 import org.truffleruby.RubyTest;
-import org.truffleruby.launcher.RubyLauncher;
 import org.truffleruby.launcher.options.OptionsCatalog;
 import org.junit.After;
 import org.junit.Assert;
@@ -30,11 +29,7 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.io.ByteArrayOutputStream;
-import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.Reader;
 import java.util.LinkedList;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -57,16 +52,6 @@ public class RubyDebugTest {
     private final ByteArrayOutputStream out = new ByteArrayOutputStream();
     private final ByteArrayOutputStream err = new ByteArrayOutputStream();
 
-    private static Source getSource(String path) {
-        InputStream stream = ClassLoader.getSystemResourceAsStream(path);
-        Reader reader = new InputStreamReader(stream);
-        try {
-            return Source.newBuilder(RubyLauncher.LANGUAGE_ID, reader, new File(path).getName()).build();
-        } catch (IOException e) {
-            throw new Error(e);
-        }
-    }
-
     @Before
     public void before() {
         suspendedEvent = null;
@@ -85,7 +70,7 @@ public class RubyDebugTest {
             suspendedEvent = null;
         });
 
-        context.eval(getSource("src/test/ruby/init.rb"));
+        context.eval(RubyTest.getSource("src/test/ruby/init.rb"));
 
         run.clear();
     }
@@ -248,7 +233,7 @@ public class RubyDebugTest {
     }
 
     private static Source createFactorial() {
-        return getSource("src/test/ruby/factorial.rb");
+        return RubyTest.getSource("src/test/ruby/factorial.rb");
     }
 
     private final String getErr() {
