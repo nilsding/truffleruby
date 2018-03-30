@@ -27,7 +27,7 @@ import static org.junit.Assert.assertNotNull;
 
 public class RubyTckTest extends TruffleTCK {
 
-    private static Source getSource(String path) {
+    private static Source getSourceOldAPI(String path) {
         InputStream stream = ClassLoader.getSystemResourceAsStream(path);
         Reader reader = new InputStreamReader(stream);
         try {
@@ -61,7 +61,7 @@ public class RubyTckTest extends TruffleTCK {
 
     private PolyglotEngine spawnNewEngine(PolyglotEngine.Builder preparedBuilder) {
         final PolyglotEngine engine = setupConfig(preparedBuilder).build();
-        engine.eval(getSource("src/test/ruby/tck.rb"));
+        engine.eval(getSourceOldAPI("src/test/ruby/tck.rb"));
         return engine;
     }
 
