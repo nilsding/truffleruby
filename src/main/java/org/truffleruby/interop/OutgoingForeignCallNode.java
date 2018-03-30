@@ -448,6 +448,7 @@ public abstract class OutgoingForeignCallNode extends RubyNode {
 
         @Child private Node isBoxedNode = Message.IS_BOXED.createNode();
         @Child private Node unboxNode;
+        @Child private ForeignToRubyNode foreignToRubyNode;
         @Child private CallDispatchHeadNode redispatchNode;
         @Child private InvokeOutgoingNode invokeOutgoingNode;
 
@@ -461,7 +462,7 @@ public abstract class OutgoingForeignCallNode extends RubyNode {
             assert args.length == argsLength;
 
             if (ForeignAccess.sendIsBoxed(isBoxedNode, receiver)) { // implicit profiling as a result of lazy nodes
-                final Object unboxedReceiver = unbox(receiver);
+                final Object unboxedReceiver = convertToRuby(unbox(receiver));
                 return reDispatch(frame, unboxedReceiver, args);
             } else {
                 return invoke(frame, receiver, args);
@@ -479,6 +480,15 @@ public abstract class OutgoingForeignCallNode extends RubyNode {
             } catch (UnsupportedMessageException e) {
                 throw new JavaException(e);
             }
+        }
+
+        private Object convertToRuby(final Object unboxedReceiver) {
+            if (foreignToRubyNode == null) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                foreignToRubyNode = insert(ForeignToRubyNode.create());
+            }
+
+            return foreignToRubyNode.executeConvert(unboxedReceiver);
         }
 
         private Object reDispatch(VirtualFrame frame, Object receiver, Object[] args) {
