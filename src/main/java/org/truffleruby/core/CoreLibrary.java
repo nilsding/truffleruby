@@ -1359,6 +1359,10 @@ public class CoreLibrary {
         return truffleRegexpOperationsModule;
     }
 
+    public DynamicObject getDirClass() {
+        return dirClass;
+    }
+
     public static final String[] CORE_FILES = {
             "/core/pre.rb",
             "/core/basic_object.rb",
